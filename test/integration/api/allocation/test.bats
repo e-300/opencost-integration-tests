@@ -26,6 +26,10 @@ teardown() {
     go test namespace_annotations_test.go
 }
 
+@test "allocation: Total Cost Matches Component Costs" {
+    go test allocation_totals_consistency_test.go
+}
+
 @test "validate_api: negative idle cost values" {
     go test idle_cost_negative_test.go
 }
