@@ -68,8 +68,6 @@ Status codes:
 | `GET` | `/v1/nodes` | Future | Read trimmed node facts |
 | `GET` | `/v1/deployments/{name}` | Future | Read pinned deployment readiness |
 | `GET` | `/v1/logs` | Future | Read trimmed logs |
-| `GET` | `/v1/fixtures/cloud-cost/{fixtureId}/raw` | Future | Read raw cloud-cost fixture |
-| `GET` | `/v1/fixtures/cloud-cost/{fixtureId}/metadata` | Future | Read fixture metadata |
 | `POST` | `/v1/config` | Future | Apply allowlisted fixture config |
 | `DELETE` | `/v1/config` | Future | Remove allowlisted fixture config |
 | `POST` | `/v1/chaos/{scenario}` | Live | Inject allowlisted chaos scenario |
@@ -81,7 +79,6 @@ Fixture IDs:
 
 | ID | Purpose |
 | --- | --- |
-| `billing-mock-v1` | Cloud cost fixture for `/cloudCost` ground-truth tests |
 | `pricing-fixed-v1` | Asset pricing fixture for asset ground-truth tests |
 
 Chaos scenarios:
@@ -115,7 +112,6 @@ Current planned consumers:
 | --- | --- |
 | Chaos testing | Live: `GET /v1/chaos`, `POST /v1/chaos/{scenario}`, `DELETE /v1/chaos/{scenario}`; optionally `GET /v1/pods` for recovery checks |
 | Restart recovery | Live: `POST /v1/restart`, `GET /v1/pods`; future: `GET /v1/deployments/{name}` |
-| Cloud-cost ground truth | `GET /v1/fixtures/cloud-cost/{fixtureId}/raw`, `GET /v1/fixtures/cloud-cost/{fixtureId}/metadata`, `POST /v1/config`, `DELETE /v1/config` |
 | Asset ground truth | `GET /v1/nodes`, `POST /v1/config`, `DELETE /v1/config` |
 
 ## Broker Metadata Endpoints
@@ -339,74 +335,17 @@ RBAC:
 - `get`, `list` on `pods`
 - `get` on `pods/log`
 
-## Fixture Endpoints
-
-### `GET /v1/fixtures/cloud-cost/{fixtureId}/raw`
-
-Purpose: return the raw cloud billing fixture that OpenCost is configured to
-ingest.
-
-Request: no body.
-
-Path parameters:
-
-| Name | Required | Notes |
-| --- | --- | --- |
-| `fixtureId` | Yes | Must be `billing-mock-v1` |
-
-Response:
-
-```text
-Content-Type: text/csv
-```
-
-The body is the raw billing export fixture.
-
-Validation:
-
-- Fixture ID must be allowlisted.
-- The broker must not accept file paths, URLs, bucket names, or arbitrary
-  fixture locations from the caller.
-
-Credentials:
-
-- No credentials are returned to the caller.
-- The broker may read the fixture from its image, a mounted ConfigMap, or trusted
-  storage.
-
-### `GET /v1/fixtures/cloud-cost/{fixtureId}/metadata`
-
-Purpose: return metadata describing the raw billing fixture.
-
-Request: no body.
-
-Response:
-
-```json
-{
-  "fixtureId": "billing-mock-v1",
-  "provider": "azure",
-  "format": "azure-csv",
-  "windowStart": "2024-10-15T00:00:00Z",
-  "windowEnd": "2024-10-17T00:00:00Z",
-  "checksum": "sha256:TODO"
-}
-```
-
-Validation:
-
-- Fixture ID must be allowlisted.
-- Metadata must describe the same fixture returned by the raw endpoint.
+## Config Endpoints
 
 ### `POST /v1/config`
 
-Purpose: apply a known fixture configuration.
+Purpose: apply a known fixture configuration, such as fixed asset pricing.
 
 Request:
 
 ```json
 {
-  "fixtureId": "billing-mock-v1"
+  "fixtureId": "pricing-fixed-v1"
 }
 ```
 
@@ -415,7 +354,7 @@ Response:
 ```json
 {
   "applied": true,
-  "fixtureId": "billing-mock-v1"
+  "fixtureId": "pricing-fixed-v1"
 }
 ```
 
@@ -438,7 +377,7 @@ Request:
 
 ```json
 {
-  "fixtureId": "billing-mock-v1"
+  "fixtureId": "pricing-fixed-v1"
 }
 ```
 
@@ -447,7 +386,7 @@ Response:
 ```json
 {
   "deleted": true,
-  "fixtureId": "billing-mock-v1"
+  "fixtureId": "pricing-fixed-v1"
 }
 ```
 
@@ -574,5 +513,5 @@ RBAC:
 2. Build a stub broker that returns these shapes.
 3. Build `pkg/cluster` against the contract.
 4. Build RBAC and ServiceAccount for the real broker.
-5. Replace stub broker handlers with real Kubernetes/cloud fixture logic.
+5. Replace stub broker handlers with real Kubernetes fixture logic.
 6. Wire integration tests through `pkg/cluster`.
