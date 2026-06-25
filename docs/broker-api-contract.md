@@ -66,7 +66,7 @@ Status codes:
 | `POST` | `/v1/restart` | Live | Restart pinned OpenCost deployment |
 | `GET` | `/v1/chaos` | Live | List allowlisted chaos scenarios |
 | `GET` | `/v1/nodes` | Future | Read trimmed node facts |
-| `GET` | `/v1/deployments/{name}` | Future | Read pinned deployment readiness |
+| `GET` | `/v1/deployments/{name}` | Live | Read pinned deployment readiness |
 | `GET` | `/v1/logs` | Future | Read trimmed logs |
 | `POST` | `/v1/config` | Future | Apply allowlisted fixture config |
 | `DELETE` | `/v1/config` | Future | Remove allowlisted fixture config |
@@ -94,8 +94,8 @@ Pinned deployment:
 
 | Field | Value |
 | --- | --- |
-| Namespace | `TODO` |
-| Deployment | `TODO` |
+| Namespace | `opencost` |
+| Deployment | `opencost` |
 
 Adding a fixture ID, scenario, endpoint, request field, or response field is a
 contract change and must be coordinated across broker, `pkg/cluster`, and tests.
@@ -111,7 +111,7 @@ Current planned consumers:
 | Test area | Contract operations used |
 | --- | --- |
 | Chaos testing | Live: `GET /v1/chaos`, `POST /v1/chaos/{scenario}`, `DELETE /v1/chaos/{scenario}`; optionally `GET /v1/pods` for recovery checks |
-| Restart recovery | Live: `POST /v1/restart`, `GET /v1/pods`; future: `GET /v1/deployments/{name}` |
+| Restart recovery | Live: `POST /v1/restart`, `GET /v1/deployments/{name}`, `GET /v1/pods` |
 | Asset ground truth | `GET /v1/nodes`, `POST /v1/config`, `DELETE /v1/config` |
 
 ## Broker Metadata Endpoints
@@ -260,7 +260,7 @@ RBAC:
 
 - `get`, `list` on `pods`
 
-### `GET /v1/deployments/{name}?namespace=<ns>`
+### `GET /v1/deployments/{name}`
 
 Purpose: read readiness for the allowlisted OpenCost deployment.
 
@@ -272,27 +272,26 @@ Path parameters:
 | --- | --- | --- |
 | `name` | Yes | Must match the pinned deployment name |
 
-Query parameters:
-
-| Name | Required | Notes |
-| --- | --- | --- |
-| `namespace` | Yes | Must match the pinned deployment namespace |
-
 Response:
 
 ```json
 {
   "name": "opencost",
   "ready": true,
+  "replicas": 1,
   "readyReplicas": 1,
-  "desiredReplicas": 1
+  "updatedReplicas": 1,
+  "availableReplicas": 1,
+  "observedGeneration": 3,
+  "generation": 3
 }
 ```
 
 Validation:
 
 - Deployment name must match the pinned allowlisted deployment.
-- Namespace must match the pinned allowlisted namespace.
+- Namespace is fixed broker-side.
+- The broker must return only the documented fields.
 
 RBAC:
 

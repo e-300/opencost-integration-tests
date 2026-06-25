@@ -77,6 +77,37 @@ func TestClientPodsDecodesTrimmedPodList(t *testing.T) {
 	}
 }
 
+func TestClientDeploymentDecodesReadiness(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != deploymentPath("opencost") {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("Authorization header = %q, want bearer token", got)
+		}
+		writeJSON(t, w, Deployment{
+			Name:               "opencost",
+			Ready:              true,
+			Replicas:           1,
+			ReadyReplicas:      1,
+			UpdatedReplicas:    1,
+			AvailableReplicas:  1,
+			ObservedGeneration: 3,
+			Generation:         3,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	deployment, err := client.Deployment(context.Background(), "opencost")
+	if err != nil {
+		t.Fatalf("Deployment() error = %v", err)
+	}
+	if !deployment.Ready || deployment.Name != "opencost" || deployment.Replicas != 1 {
+		t.Fatalf("unexpected deployment: %+v", deployment)
+	}
+}
+
 func TestClientChaosScenariosDecodesScenarioList(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != pathChaos {
@@ -174,16 +205,23 @@ func TestNewClientFromEnv(t *testing.T) {
 func TestWaitForOpenCostReady(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		if requests == 1 {
+		switch r.URL.Path {
+		case deploymentPath(defaultOpenCostDeployment):
+			writeJSON(t, w, Deployment{Name: defaultOpenCostDeployment, Ready: true})
+		case pathPods:
+			requests++
+			if requests == 1 {
+				writeJSON(t, w, podsResponse{
+					Pods: []Pod{{Name: "opencost-abc", Phase: "Running", Ready: false}},
+				})
+				return
+			}
 			writeJSON(t, w, podsResponse{
-				Pods: []Pod{{Name: "opencost-abc", Phase: "Running", Ready: false}},
+				Pods: []Pod{{Name: "opencost-abc", Phase: "Running", Ready: true}},
 			})
-			return
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		writeJSON(t, w, podsResponse{
-			Pods: []Pod{{Name: "opencost-abc", Phase: "Running", Ready: true}},
-		})
 	}))
 	defer server.Close()
 
@@ -197,6 +235,37 @@ func TestWaitForOpenCostReady(t *testing.T) {
 	}
 	if len(pods) != 1 || !pods[0].Ready {
 		t.Fatalf("pods = %+v, want one ready pod", pods)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+}
+
+func TestWaitForDeploymentReady(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != deploymentPath("opencost") {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if requests == 1 {
+			writeJSON(t, w, Deployment{Name: "opencost", Ready: false})
+			return
+		}
+		writeJSON(t, w, Deployment{Name: "opencost", Ready: true})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	deployment, err := client.WaitForDeploymentReady(ctx, "opencost", time.Millisecond)
+	if err != nil {
+		t.Fatalf("WaitForDeploymentReady() error = %v", err)
+	}
+	if !deployment.Ready {
+		t.Fatalf("deployment = %+v, want ready", deployment)
 	}
 	if requests != 2 {
 		t.Fatalf("requests = %d, want 2", requests)

@@ -16,6 +16,8 @@ const (
 	EnvBrokerURL   = "OPENCOST_BROKER_URL"
 	EnvBrokerToken = "OPENCOST_BROKER_TOKEN"
 
+	defaultOpenCostDeployment = "opencost"
+
 	pathHealthz = "/healthz"
 	pathChaos   = "/v1/chaos"
 	pathPods    = "/v1/pods"
@@ -33,6 +35,17 @@ type Pod struct {
 	Phase        string `json:"phase"`
 	Ready        bool   `json:"ready"`
 	RestartCount int    `json:"restartCount"`
+}
+
+type Deployment struct {
+	Name               string `json:"name"`
+	Ready              bool   `json:"ready"`
+	Replicas           int32  `json:"replicas"`
+	ReadyReplicas      int32  `json:"readyReplicas"`
+	UpdatedReplicas    int32  `json:"updatedReplicas"`
+	AvailableReplicas  int32  `json:"availableReplicas"`
+	ObservedGeneration int64  `json:"observedGeneration"`
+	Generation         int64  `json:"generation"`
 }
 
 type ChaosScenario struct {
@@ -133,6 +146,14 @@ func (c *Client) Pods(ctx context.Context) ([]Pod, error) {
 	return response.Pods, nil
 }
 
+func (c *Client) Deployment(ctx context.Context, name string) (Deployment, error) {
+	var response Deployment
+	if err := c.do(ctx, http.MethodGet, deploymentPath(name), true, nil, &response); err != nil {
+		return Deployment{}, err
+	}
+	return response, nil
+}
+
 func (c *Client) ChaosScenarios(ctx context.Context) ([]ChaosScenario, error) {
 	var response chaosScenariosResponse
 	if err := c.do(ctx, http.MethodGet, pathChaos, true, nil, &response); err != nil {
@@ -164,6 +185,13 @@ func (c *Client) CleanupChaos(ctx context.Context, scenario string) error {
 }
 
 func (c *Client) WaitForOpenCostReady(ctx context.Context, interval time.Duration) ([]Pod, error) {
+	if _, err := c.WaitForDeploymentReady(ctx, defaultOpenCostDeployment, interval); err != nil {
+		return nil, err
+	}
+	return c.WaitForPodsReady(ctx, interval)
+}
+
+func (c *Client) WaitForPodsReady(ctx context.Context, interval time.Duration) ([]Pod, error) {
 	if interval <= 0 {
 		interval = time.Second
 	}
@@ -183,6 +211,31 @@ func (c *Client) WaitForOpenCostReady(ctx context.Context, interval time.Duratio
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("waiting for OpenCost pods ready: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (c *Client) WaitForDeploymentReady(ctx context.Context, name string, interval time.Duration) (Deployment, error) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		deployment, err := c.Deployment(ctx, name)
+		if err != nil {
+			return Deployment{}, err
+		}
+		if deployment.Ready {
+			return deployment, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return Deployment{}, fmt.Errorf("waiting for deployment %q ready: %w", name, ctx.Err())
 		case <-ticker.C:
 		}
 	}
@@ -240,6 +293,10 @@ func (c *Client) url(path string) string {
 
 func chaosScenarioPath(scenario string) string {
 	return pathChaos + "/" + strings.TrimLeft(scenario, "/")
+}
+
+func deploymentPath(name string) string {
+	return "/v1/deployments/" + strings.TrimLeft(name, "/")
 }
 
 func brokerRequestError(method string, path string, statusCode int, raw []byte) error {

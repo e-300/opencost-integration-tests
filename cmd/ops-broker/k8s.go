@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -94,6 +95,33 @@ type PodInfo struct {
 	RestartCount int32  `json:"restartCount"`
 }
 
+// DeploymentInfo is the trimmed deployment readiness view returned by the
+// broker. It intentionally excludes raw deployment spec and pod-template data.
+type DeploymentInfo struct {
+	Name               string `json:"name"`
+	Ready              bool   `json:"ready"`
+	Replicas           int32  `json:"replicas"`
+	ReadyReplicas      int32  `json:"readyReplicas"`
+	UpdatedReplicas    int32  `json:"updatedReplicas"`
+	AvailableReplicas  int32  `json:"availableReplicas"`
+	ObservedGeneration int64  `json:"observedGeneration"`
+	Generation         int64  `json:"generation"`
+}
+
+// DeploymentStatus reads readiness for the single allowlisted OpenCost
+// deployment. The name must match config so callers cannot enumerate workloads.
+func (c *K8sClient) DeploymentStatus(ctx context.Context, name string) (DeploymentInfo, error) {
+	if name != c.deploy {
+		return DeploymentInfo{}, fmt.Errorf("deployment %q is not allowlisted", name)
+	}
+
+	deployment, err := c.client.AppsV1().Deployments(c.namespace).Get(ctx, c.deploy, metav1.GetOptions{})
+	if err != nil {
+		return DeploymentInfo{}, fmt.Errorf("getting deployment %s/%s: %w", c.namespace, c.deploy, err)
+	}
+	return deploymentInfo(*deployment), nil
+}
+
 // PodStatus lists OpenCost pods so tests can wait for readiness after a restart.
 func (c *K8sClient) PodStatus(ctx context.Context) ([]PodInfo, error) {
 	pods, err := c.client.CoreV1().Pods(c.namespace).List(
@@ -113,6 +141,30 @@ func (c *K8sClient) PodStatus(ctx context.Context) ([]PodInfo, error) {
 		})
 	}
 	return out, nil
+}
+
+func deploymentInfo(deployment appsv1.Deployment) DeploymentInfo {
+	replicas := int32(1)
+	if deployment.Spec.Replicas != nil {
+		replicas = *deployment.Spec.Replicas
+	}
+	return DeploymentInfo{
+		Name:               deployment.Name,
+		Ready:              deploymentReady(deployment, replicas),
+		Replicas:           replicas,
+		ReadyReplicas:      deployment.Status.ReadyReplicas,
+		UpdatedReplicas:    deployment.Status.UpdatedReplicas,
+		AvailableReplicas:  deployment.Status.AvailableReplicas,
+		ObservedGeneration: deployment.Status.ObservedGeneration,
+		Generation:         deployment.Generation,
+	}
+}
+
+func deploymentReady(deployment appsv1.Deployment, replicas int32) bool {
+	return deployment.Status.ObservedGeneration >= deployment.Generation &&
+		deployment.Status.ReadyReplicas >= replicas &&
+		deployment.Status.UpdatedReplicas >= replicas &&
+		deployment.Status.AvailableReplicas >= replicas
 }
 
 func podReady(p corev1.Pod) bool {
