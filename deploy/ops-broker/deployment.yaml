@@ -25,6 +25,18 @@ spec:
                 secretKeyRef:
                   name: ops-broker-auth
                   key: token
+            - name: BROKER_NAMESPACE
+              value: opencost
+            - name: BROKER_OPENCOST_DEPLOYMENT
+              value: opencost
+            - name: BROKER_OPENCOST_SELECTOR
+              value: app.kubernetes.io/name=opencost
+            - name: BROKER_PROMETHEUS_NAMESPACE
+              value: prometheus-system
+            - name: BROKER_PROMETHEUS_SELECTOR
+              value: app.kubernetes.io/name=prometheus,app.kubernetes.io/component=server
+            - name: BROKER_CHAOS_NAMESPACE
+              value: opencost
           livenessProbe:
             httpGet:
               path: /healthz

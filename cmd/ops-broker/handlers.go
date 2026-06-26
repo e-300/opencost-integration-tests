@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // newMux wires the frozen HTTP contract. Each authed route is a named button;
@@ -10,7 +11,11 @@ import (
 //
 //	GET  /healthz   — unauthenticated liveness
 //	GET  /v1/pods   — list OpenCost pods (wait-for-ready)
+//	GET  /v1/deployments/{name} — read pinned deployment readiness
 //	POST /v1/restart — trigger rolling restart of OpenCost
+//	GET  /v1/chaos — list allowlisted chaos scenarios
+//	POST /v1/chaos/{scenario} — inject one allowlisted chaos scenario
+//	DELETE /v1/chaos/{scenario} — cleanup one allowlisted chaos scenario
 func newMux(cfg Config, k8s *K8sClient) *http.ServeMux {
 	mux := http.NewServeMux()
 
@@ -29,6 +34,16 @@ func newMux(cfg Config, k8s *K8sClient) *http.ServeMux {
 			writeJSON(w, http.StatusOK, map[string]any{"pods": pods})
 		}))
 
+	mux.HandleFunc("GET /v1/deployments/{name}", requireToken(cfg.AuthToken,
+		func(w http.ResponseWriter, r *http.Request) {
+			deployment, err := k8s.DeploymentStatus(r.Context(), r.PathValue("name"))
+			if err != nil {
+				writeDeploymentError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, deployment)
+		}))
+
 	mux.HandleFunc("POST /v1/restart", requireToken(cfg.AuthToken,
 		func(w http.ResponseWriter, r *http.Request) {
 			if err := k8s.RestartOpenCost(r.Context()); err != nil {
@@ -38,6 +53,37 @@ func newMux(cfg Config, k8s *K8sClient) *http.ServeMux {
 			writeJSON(w, http.StatusOK, map[string]string{"status": "restart triggered"})
 		}))
 
+	mux.HandleFunc("GET /v1/chaos", requireToken(cfg.AuthToken,
+		func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]any{"scenarios": SupportedChaosScenarios()})
+		}))
+
+	mux.HandleFunc("POST /v1/chaos/{scenario}", requireToken(cfg.AuthToken,
+		func(w http.ResponseWriter, r *http.Request) {
+			scenario := r.PathValue("scenario")
+			if err := k8s.InjectChaos(r.Context(), scenario); err != nil {
+				writeChaosError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"injected": true,
+				"scenario": scenario,
+			})
+		}))
+
+	mux.HandleFunc("DELETE /v1/chaos/{scenario}", requireToken(cfg.AuthToken,
+		func(w http.ResponseWriter, r *http.Request) {
+			scenario := r.PathValue("scenario")
+			if err := k8s.CleanupChaos(r.Context(), scenario); err != nil {
+				writeChaosError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"deleted":  true,
+				"scenario": scenario,
+			})
+		}))
+
 	return mux
 }
 
@@ -45,4 +91,20 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeChaosError(w http.ResponseWriter, err error) {
+	if _, ok := err.(unknownScenarioError); ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+}
+
+func writeDeploymentError(w http.ResponseWriter, err error) {
+	if strings.Contains(err.Error(), "not allowlisted") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 }

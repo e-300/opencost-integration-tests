@@ -15,3 +15,6 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]   # left namespace-wide (list can't be name-scoped)
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["podchaos", "networkchaos"]
+    verbs: ["get", "list", "watch", "create", "delete"]

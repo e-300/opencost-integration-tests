@@ -12,7 +12,7 @@ func requireToken(token string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		got := []byte(strings.TrimSpace(r.Header.Get("Authorization")))
 		if subtle.ConstantTimeCompare(got, want) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
 		next(w, r)
